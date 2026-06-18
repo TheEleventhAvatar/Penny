@@ -227,7 +227,7 @@ export class Prava {
   private authHeaders(): Record<string, string> {
     return {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${this.secretKey}`,
+      'Api-Key': this.publishableKey,
     };
   }
 
