@@ -4,8 +4,8 @@ import type { CollectPANResult, CollectPANOptions } from '@prava-sdk/core';
 // ── Configuration ────────────────────────────────────────────
 
 export interface PravaConfig {
-  publishableKey: string;   // pk_live_xxx | pk_test_xxx — for SDK
-  secretKey: string;        // sk_xxx — for server-side API calls
+  apiKey: string;           // pk_live_xxx | pk_test_xxx — for Api-Key header & SDK
+  secretKey?: string;       // sk_xxx — for server-side auth (Bearer token)
   baseUrl?: string;         // API base URL (default: https://api.prava.space)
   iframeUrl?: string;       // Card collection iframe URL (default: https://collect.prava.space)
 }
@@ -135,14 +135,14 @@ export class PravaError extends Error {
 // Card collection is handled client-side via the PravaSDK.
 
 export class Prava {
-  private readonly publishableKey: string;
-  private readonly secretKey: string;
+  private readonly apiKey: string;
+  private readonly secretKey?: string;
   private readonly baseUrl: string;
   private readonly iframeUrl: string;
   private sdk: PravaSDK | null = null;
 
   constructor(config: PravaConfig) {
-    this.publishableKey = config.publishableKey;
+    this.apiKey = config.apiKey;
     this.secretKey = config.secretKey;
     this.baseUrl = config.baseUrl ?? 'https://api.prava.space';
     this.iframeUrl = config.iframeUrl ?? 'https://collect.prava.space';
@@ -155,7 +155,7 @@ export class Prava {
    */
   initSDK(): PravaSDK {
     if (!this.sdk) {
-      this.sdk = new PravaSDK({ publishableKey: this.publishableKey });
+      this.sdk = new PravaSDK({ publishableKey: this.apiKey });
     }
     return this.sdk;
   }
@@ -316,10 +316,11 @@ export class Prava {
 
   // ── Helpers ──────────────────────────────────────────────
 
-  private headers(): Record<string, string> {
+  private headers(includeSecret = false): Record<string, string> {
     return {
       'Content-Type': 'application/json',
-      'Api-Key': this.secretKey,
+      'Api-Key': this.apiKey,
+      ...(includeSecret && this.secretKey ? { Authorization: `Bearer ${this.secretKey}` } : {}),
     };
   }
 
@@ -353,24 +354,18 @@ export class Prava {
 // ── Factory ──────────────────────────────────────────────────
 
 export function createPravaFromEnv(): Prava {
-  const publishableKey = process.env.PRAVA_PUBLISHABLE_KEY || process.env.PRAVA_API_KEY;
+  const apiKey = process.env.PRAVA_API_KEY;
   const secretKey = process.env.PRAVA_SECRET_KEY;
 
-  if (!publishableKey) {
+  if (!apiKey) {
     throw new PravaError(
-      'Missing PRAVA_PUBLISHABLE_KEY or PRAVA_API_KEY in environment',
-      'PRAVA_CONFIG_ERROR',
-    );
-  }
-  if (!secretKey) {
-    throw new PravaError(
-      'Missing PRAVA_SECRET_KEY in environment',
+      'Missing PRAVA_API_KEY in environment',
       'PRAVA_CONFIG_ERROR',
     );
   }
 
   return new Prava({
-    publishableKey,
+    apiKey,
     secretKey,
     baseUrl: process.env.PRAVA_BASE_URL,
     iframeUrl: process.env.PRAVA_IFRAME_URL,
