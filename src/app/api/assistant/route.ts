@@ -15,21 +15,19 @@ export async function POST(request: Request) {
     const extracted = await extractPurchaseIntent(body.userMessage);
     const intent = purchaseIntentSchema.parse(asPurchaseIntent(extracted));
 
-    const result = await prava.registerIntent({
-      cardId: body.userId, // will be replaced with actual enrolled card ID
-      merchant: intent.merchant,
-      amount: intent.amount,
+    const session = await prava.createSession({
+      userId: body.userId,
+      userEmail: `${body.userId}@penny.app`,
+      totalAmount: String(intent.amount),
       currency: intent.currency,
-      itemCount: 1,
-      useLimit: 1,
+      description: `${intent.product} from ${intent.merchant} — ${intent.reason}`,
     });
 
     return NextResponse.json({
-      intentId: result.intentId,
-      status: result.status,
-      mcc: result.mcc,
-      mandateId: result.mandateId,
-      createdAt: result.createdAt,
+      sessionId: session.session_id,
+      sessionToken: session.session_token,
+      iframeUrl: session.iframe_url,
+      orderId: session.order_id,
     });
   } catch (error) {
     if (error instanceof PravaError) {
@@ -38,7 +36,6 @@ export async function POST(request: Request) {
           error: error.message,
           code: error.code,
           details: error.details,
-          requestId: error.requestId,
         },
         { status: error.code === 'PRAVA_CONFIG_ERROR' ? 500 : 502 },
       );

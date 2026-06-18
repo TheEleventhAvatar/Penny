@@ -22,20 +22,18 @@ export async function runCommerceAssistant(input: {
   const extracted = await extractPurchaseIntent(input.userMessage);
   const intent = asPurchaseIntent(extracted) satisfies PurchaseIntent;
 
-  const result = await prava.registerIntent({
-    cardId: input.userId, // will be replaced with actual enrolled card ID
-    merchant: intent.merchant,
-    amount: intent.amount,
+  const session = await prava.createSession({
+    userId: input.userId,
+    userEmail: `${input.userId}@penny.app`,
+    totalAmount: String(intent.amount),
     currency: intent.currency,
-    itemCount: 1,
-    useLimit: 1,
+    description: `${intent.product} from ${intent.merchant} — ${intent.reason}`,
   });
 
   return {
-    intentId: result.intentId,
-    status: result.status,
-    mcc: result.mcc,
-    mandateId: result.mandateId,
-    createdAt: result.createdAt,
+    sessionId: session.session_id,
+    sessionToken: session.session_token,
+    iframeUrl: session.iframe_url,
+    orderId: session.order_id,
   };
 }

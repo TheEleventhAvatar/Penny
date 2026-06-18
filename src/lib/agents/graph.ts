@@ -32,18 +32,17 @@ export const commerceGraph = new StateGraph(CommerceState)
     }
 
     const prava = createPravaFromEnv();
-    const result = await prava.registerIntent({
-      cardId: state.userId, // will be replaced with actual enrolled card ID
-      merchant: state.intent.merchant,
-      amount: state.intent.amount,
+    const session = await prava.createSession({
+      userId: state.userId,
+      userEmail: `${state.userId}@penny.app`,
+      totalAmount: String(state.intent.amount),
       currency: state.intent.currency,
-      itemCount: 1,
-      useLimit: 1,
+      description: `${state.intent.product} from ${state.intent.merchant} — ${state.intent.reason}`,
     });
 
     return {
-      approvalId: result.intentId,
-      pravaIntentId: result.intentId,
+      pravaIntentId: session.session_id,
+      approvalId: session.session_token,
       intent: state.intent,
     };
   })
@@ -53,14 +52,11 @@ export const commerceGraph = new StateGraph(CommerceState)
     }
 
     const prava = createPravaFromEnv();
-    const tokens = await prava.invokeIntent({
-      intentId: state.pravaIntentId,
-      merchant: state.intent?.merchant ?? '',
-      amount: state.intent?.amount ?? 0,
-    });
+    const result = await prava.pollPaymentResult(state.pravaIntentId);
 
     return {
-      transactionId: `txn_${Date.now()}`,
+      transactionId: result.transactions[0]?.txn_id ?? null,
+      receiptUrl: result.transactions[0]?.line_items?.[0]?.token ?? null,
     };
   })
   .addEdge('__start__', 'intent')
