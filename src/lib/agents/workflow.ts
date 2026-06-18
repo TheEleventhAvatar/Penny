@@ -1,6 +1,6 @@
 import type { ProductOffer, PurchaseIntent } from '@/lib/domain';
 import { asPurchaseIntent, extractPurchaseIntent } from '@/lib/agents/intent-agent';
-import { createPravaClientFromEnv } from '@/lib/prava/client';
+import { createPravaFromEnv } from '@/lib/prava/client';
 
 export type DiscoveryResult = {
   intent: PurchaseIntent;
@@ -18,20 +18,24 @@ export async function runCommerceAssistant(input: {
   userMessage: string;
   conversationId?: string;
 }) {
-  const prava = createPravaClientFromEnv();
+  const prava = createPravaFromEnv();
   const extracted = await extractPurchaseIntent(input.userMessage);
   const intent = asPurchaseIntent(extracted) satisfies PurchaseIntent;
 
-  const purchaseIntent = await prava.createPurchaseIntent({
-    ...intent,
-    user_id: input.userId,
-    conversation_id: input.conversationId,
+  const result = await prava.registerIntent({
+    cardId: input.userId, // will be replaced with actual enrolled card ID
+    merchant: intent.merchant,
+    amount: intent.amount,
+    currency: intent.currency,
+    itemCount: 1,
+    useLimit: 1,
   });
 
-  const approval = await prava.requestApproval(purchaseIntent.intent_id, input.userId);
-
   return {
-    purchaseIntent,
-    approval,
+    intentId: result.intentId,
+    status: result.status,
+    mcc: result.mcc,
+    mandateId: result.mandateId,
+    createdAt: result.createdAt,
   };
 }

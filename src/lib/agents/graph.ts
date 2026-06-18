@@ -1,6 +1,6 @@
 import { Annotation, StateGraph } from '@langchain/langgraph';
 import { asPurchaseIntent, extractPurchaseIntent } from '@/lib/agents/intent-agent';
-import { createPravaClientFromEnv } from '@/lib/prava/client';
+import { createPravaFromEnv } from '@/lib/prava/client';
 import type { PurchaseIntent, ProductOffer } from '@/lib/domain';
 
 const CommerceState = Annotation.Root({
@@ -31,31 +31,20 @@ export const commerceGraph = new StateGraph(CommerceState)
       return {};
     }
 
-    const prava = createPravaClientFromEnv();
-    const createdIntent = await prava.createPurchaseIntent({
-      user_id: state.userId,
+    const prava = createPravaFromEnv();
+    const result = await prava.registerIntent({
+      cardId: state.userId, // will be replaced with actual enrolled card ID
       merchant: state.intent.merchant,
-      product: state.intent.product,
       amount: state.intent.amount,
       currency: state.intent.currency,
-      reason: state.intent.reason,
-      category: state.intent.category,
-      metadata: {
-        location: state.intent.location,
-        limitReason: state.intent.limitReason,
-      },
+      itemCount: 1,
+      useLimit: 1,
     });
 
-    const approval = await prava.requestApproval(createdIntent.intent_id, state.userId);
-
     return {
-      approvalId: approval.approval_id,
-      pravaIntentId: createdIntent.intent_id,
-      intent: {
-        ...state.intent,
-        merchant: createdIntent.merchant,
-        product: createdIntent.product,
-      },
+      approvalId: result.intentId,
+      pravaIntentId: result.intentId,
+      intent: state.intent,
     };
   })
   .addNode('purchase', async (state) => {
@@ -63,11 +52,15 @@ export const commerceGraph = new StateGraph(CommerceState)
       return {};
     }
 
-    const prava = createPravaClientFromEnv();
-    const transaction = await prava.issueMerchantToken(state.pravaIntentId);
+    const prava = createPravaFromEnv();
+    const tokens = await prava.invokeIntent({
+      intentId: state.pravaIntentId,
+      merchant: state.intent?.merchant ?? '',
+      amount: state.intent?.amount ?? 0,
+    });
 
     return {
-      transactionId: transaction.transaction_id,
+      transactionId: `txn_${Date.now()}`,
     };
   })
   .addEdge('__start__', 'intent')

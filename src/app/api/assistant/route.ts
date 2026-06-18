@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { asPurchaseIntent, extractPurchaseIntent } from '@/lib/agents/intent-agent';
-import { PravaClientError, createPravaClientFromEnv } from '@/lib/prava/client';
+import { PravaError, createPravaFromEnv } from '@/lib/prava/client';
 import { purchaseIntentSchema } from '@/lib/domain';
 
 export async function POST(request: Request) {
@@ -11,24 +11,28 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'userMessage and userId are required' }, { status: 400 });
     }
 
-    const prava = createPravaClientFromEnv();
+    const prava = createPravaFromEnv();
     const extracted = await extractPurchaseIntent(body.userMessage);
     const intent = purchaseIntentSchema.parse(asPurchaseIntent(extracted));
 
-    const purchaseIntent = await prava.createPurchaseIntent({
-      ...intent,
-      user_id: body.userId,
-      conversation_id: body.conversationId,
+    const result = await prava.registerIntent({
+      cardId: body.userId, // will be replaced with actual enrolled card ID
+      merchant: intent.merchant,
+      amount: intent.amount,
+      currency: intent.currency,
+      itemCount: 1,
+      useLimit: 1,
     });
-
-    const approval = await prava.requestApproval(purchaseIntent.intent_id, body.userId);
 
     return NextResponse.json({
-      intent: purchaseIntent,
-      approval,
+      intentId: result.intentId,
+      status: result.status,
+      mcc: result.mcc,
+      mandateId: result.mandateId,
+      createdAt: result.createdAt,
     });
   } catch (error) {
-    if (error instanceof PravaClientError) {
+    if (error instanceof PravaError) {
       return NextResponse.json(
         {
           error: error.message,

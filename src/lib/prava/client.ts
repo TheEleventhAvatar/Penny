@@ -1,274 +1,325 @@
-import { z } from 'zod';
 import { PravaSDK } from '@prava-sdk/core';
-import type {
-  PravaApiError,
-  PravaApprovalRequest,
-  PravaAuthResponse,
-  PravaPurchaseIntent,
-  PravaSessionResponse,
-  PravaTransactionStatus,
-  PravaTransactionToken,
-  PurchaseIntentInput,
-  PravaRetryOptions,
-} from './types';
-import { withRetry } from './retry';
-import { pravaPurchaseIntentRequestSchema, pravaPurchaseIntentSchema } from './types';
+import type { CollectPANResult, CollectPANOptions } from '@prava-sdk/core';
 
-const authResponseSchema = z.object({
-  access_token: z.string(),
-  token_type: z.literal('Bearer'),
-  expires_at: z.string(),
-  scope: z.array(z.string()).optional(),
-});
+// ── Configuration ────────────────────────────────────────────
 
-const sessionResponseSchema = z.object({
-  session_token: z.string(),
-  iframe_url: z.string().url(),
-  expires_at: z.string(),
-  user_id: z.string(),
-});
-
-const intentResponseSchema = z.object({
-  intent_id: z.string(),
-  merchant: z.string(),
-  product: z.string(),
-  amount: z.number(),
-  currency: z.string(),
-  status: z.enum(['draft', 'pending_approval', 'approved', 'rejected', 'completed']),
-  reason: z.string(),
-  approval_required: z.boolean(),
-  approval_id: z.string().optional(),
-  created_at: z.string(),
-  updated_at: z.string(),
-  expires_at: z.string().optional(),
-  metadata: z.record(z.string(), z.unknown()).optional(),
-});
-
-const approvalResponseSchema = z.object({
-  approval_id: z.string(),
-  intent_id: z.string(),
-  user_id: z.string(),
-  approval_url: z.string().url(),
-  status: z.enum(['pending', 'approved', 'rejected', 'expired']),
-  passkey_required: z.literal(true),
-  requested_at: z.string(),
-  approved_at: z.string().optional(),
-});
-
-const transactionTokenSchema = z.object({
-  transaction_id: z.string(),
-  intent_id: z.string(),
-  merchant: z.string(),
-  status: z.enum(['pending', 'authorized', 'captured', 'failed']),
-  token_type: z.literal('merchant_scoped'),
-  merchant_token: z.object({
-    pan: z.string(),
-    exp_month: z.number(),
-    exp_year: z.number(),
-    cvv: z.string(),
-    network: z.string(),
-    last4: z.string(),
-  }),
-  requested_at: z.string(),
-});
-
-const transactionStatusSchema = z.object({
-  transaction_id: z.string(),
-  intent_id: z.string(),
-  merchant: z.string(),
-  amount: z.number(),
-  currency: z.string(),
-  status: z.enum(['pending', 'authorized', 'captured', 'failed', 'voided']),
-  authorization_code: z.string().optional(),
-  receipt_url: z.string().url().optional(),
-  failure_reason: z.string().optional(),
-  updated_at: z.string(),
-});
-
-function toPravaError(status: number, payload: unknown, requestId?: string): PravaApiError {
-  const details = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : undefined;
-  return {
-    code: typeof details?.code === 'string' ? details.code : 'PRAVA_REQUEST_FAILED',
-    message: typeof details?.message === 'string' ? details.message : 'Prava request failed',
-    details,
-    status,
-    requestId,
-  };
+export interface PravaConfig {
+  publishableKey: string;   // pk_live_xxx | pk_test_xxx — for SDK
+  secretKey: string;        // sk_xxx — for server-side API calls
+  baseUrl?: string;         // API base URL (default: https://api.prava.space)
+  iframeUrl?: string;       // Card collection iframe URL (default: https://collect.prava.space)
 }
 
-export class PravaClientError extends Error {
+// ── Session ──────────────────────────────────────────────────
+
+export interface SessionResponse {
+  session_token: string;
+  iframe_url: string;
+  expires_at: string;
+  user_id: string;
+}
+
+// ── Register Intent ──────────────────────────────────────────
+
+export interface RegisterIntentParams {
+  cardId: string;
+  merchant: string;
+  amount: number;
+  currency: string;
+  itemCount?: number;
+  productUrl?: string;
+  useLimit?: number;
+  frequency?: 'one-time' | 'daily' | 'weekly' | 'monthly';
+  expiresAt?: string;
+}
+
+export interface RegisterIntentResult {
+  intentId: string;
+  status: 'approved' | 'rejected';
+  mcc: string;
+  mandateId: string;
+  createdAt: string;
+}
+
+// ── Invoke Intent ────────────────────────────────────────────
+
+export interface InvokeIntentParams {
+  intentId: string;
+  merchant: string;
+  amount: number;
+  itemCount?: number;
+}
+
+export interface PaymentTokens {
+  pan: string;
+  expMonth: number;
+  expYear: number;
+  cvv: string;
+}
+
+// ── Register & Invoke ────────────────────────────────────────
+
+export interface RegisterAndInvokeParams {
+  cardId: string;
+  merchant: string;
+  amount: number;
+  currency: string;
+  itemCount?: number;
+  productUrl?: string;
+}
+
+// ── Update Intent ────────────────────────────────────────────
+
+export interface UpdateIntentParams {
+  intentId: string;
+  amount?: number;
+  itemCount?: number;
+  useLimit?: number;
+  frequency?: 'one-time' | 'daily' | 'weekly' | 'monthly';
+  expiresAt?: string;
+}
+
+export interface UpdateIntentResult {
+  intentId: string;
+  status: 'updated';
+  updatedFields: string[];
+}
+
+// ── Delete Intent ────────────────────────────────────────────
+
+export interface DeleteIntentResult {
+  intentId: string;
+  status: 'cancelled';
+}
+
+// ── Card Management ──────────────────────────────────────────
+
+export interface RemoveCardResult {
+  cardId: string;
+  status: 'removed';
+}
+
+export interface Card {
+  cardId: string;
+  last4: string;
+  brand: string;
+  expMonth: number;
+  expYear: number;
+  status: 'active' | 'expired' | 'removed';
+}
+
+// ── Error ────────────────────────────────────────────────────
+
+export class PravaError extends Error {
   code: string;
   details?: Record<string, unknown>;
   requestId?: string;
+  status?: number;
 
-  constructor(message: string, code = 'PRAVA_ERROR', options: { details?: Record<string, unknown>; requestId?: string } = {}) {
+  constructor(
+    message: string,
+    code = 'PRAVA_ERROR',
+    options: { details?: Record<string, unknown>; requestId?: string; status?: number } = {},
+  ) {
     super(message);
-    this.name = 'PravaClientError';
+    this.name = 'PravaError';
     this.code = code;
     this.details = options.details;
     this.requestId = options.requestId;
+    this.status = options.status;
   }
 }
 
-export interface PravaClientConfig {
-  apiKey: string;
-  secretKey: string;
-  baseUrl?: string;
-  retry?: PravaRetryOptions;
-}
+// ── Prava (Server-Side Client) ────────────────────────────────
+// Wraps the Prava REST API for server-side use (sessions, intents, tokens, etc.)
+// Card collection is handled client-side via the PravaSDK.
 
-export class PravaClient {
-  private readonly apiKey: string;
+export class Prava {
+  private readonly publishableKey: string;
   private readonly secretKey: string;
   private readonly baseUrl: string;
-  private readonly retry: PravaRetryOptions;
+  private readonly iframeUrl: string;
+  private sdk: PravaSDK | null = null;
 
-  constructor(config: PravaClientConfig) {
-    this.apiKey = config.apiKey;
+  constructor(config: PravaConfig) {
+    this.publishableKey = config.publishableKey;
     this.secretKey = config.secretKey;
-    this.baseUrl = config.baseUrl ?? process.env.PRAVA_BASE_URL ?? 'https://api.prava.space';
-    this.retry = config.retry ?? { retries: 2, delayMs: 300, backoffFactor: 2 };
+    this.baseUrl = config.baseUrl ?? 'https://api.prava.space';
+    this.iframeUrl = config.iframeUrl ?? 'https://collect.prava.space';
   }
 
-  async authenticate(): Promise<PravaAuthResponse> {
-    return withRetry(async () => {
-      const response = await fetch(`${this.baseUrl}/v1/auth/token`, {
-        method: 'POST',
-        headers: this.getHeaders(true),
-        body: JSON.stringify({ grantType: 'client_credentials' }),
-      });
+  // ── Card Collection (client-side, via SDK) ───────────────
 
-      const payload = await this.parseJson(response);
-      if (!response.ok) {
-        throw toPravaError(response.status, payload, response.headers.get('x-request-id') ?? undefined);
-      }
-
-      return authResponseSchema.parse(payload);
-    }, this.retry);
+  /**
+   * Initialize the client-side Prava SDK for card collection.
+   */
+  initSDK(): PravaSDK {
+    if (!this.sdk) {
+      this.sdk = new PravaSDK({ publishableKey: this.publishableKey });
+    }
+    return this.sdk;
   }
 
-  async createSession(userId: string, userEmail?: string): Promise<PravaSessionResponse> {
-    return withRetry(async () => {
-      const response = await fetch(`${this.baseUrl}/v1/sessions`, {
-        method: 'POST',
-        headers: this.getHeaders(),
-        body: JSON.stringify({ userId, userEmail }),
-      });
-
-      const payload = await this.parseJson(response);
-      if (!response.ok) {
-        throw toPravaError(response.status, payload, response.headers.get('x-request-id') ?? undefined);
-      }
-
-      return sessionResponseSchema.parse(payload);
-    }, this.retry);
+  /**
+   * Securely collect card details via PCI-compliant iframe.
+   * Uses @prava-sdk/core under the hood.
+   *
+   * @param sessionToken - Session token from createSession()
+   * @param container - CSS selector or DOM element to mount the card form
+   * @param callbacks - Optional event callbacks
+   */
+  async collectPAN(
+    sessionToken: string,
+    container: string | HTMLElement,
+    callbacks?: Pick<CollectPANOptions, 'onReady' | 'onChange' | 'onSuccess' | 'onError'>,
+  ): Promise<CollectPANResult> {
+    const sdk = this.initSDK();
+    return sdk.collectPAN({
+      sessionToken,
+      iframeUrl: this.iframeUrl,
+      container,
+      ...callbacks,
+    });
   }
 
-  async createPurchaseIntent(input: PurchaseIntentInput): Promise<PravaPurchaseIntent> {
-    return withRetry(async () => {
-      const validatedInput = pravaPurchaseIntentRequestSchema.parse(input);
-      const response = await fetch(`${this.baseUrl}/v1/intents`, {
-        method: 'POST',
-        headers: this.getHeaders(),
-        body: JSON.stringify({
-          ...validatedInput,
-          channel: 'agentic-commerce',
-        }),
-      });
-
-      const payload = await this.parseJson(response);
-      if (!response.ok) {
-        throw toPravaError(response.status, payload, response.headers.get('x-request-id') ?? undefined);
-      }
-
-      return intentResponseSchema.parse(payload);
-    }, this.retry);
+  /**
+   * Clean up the SDK instance and remove the iframe.
+   */
+  destroySDK(): void {
+    if (this.sdk) {
+      this.sdk.destroy();
+      this.sdk = null;
+    }
   }
 
-  async requestApproval(intentId: string, userId: string): Promise<PravaApprovalRequest> {
-    return withRetry(async () => {
-      const response = await fetch(`${this.baseUrl}/v1/intents/${intentId}/approvals`, {
-        method: 'POST',
-        headers: this.getHeaders(),
-        body: JSON.stringify({ userId, approvalMode: 'passkey' }),
-      });
+  // ── Session Management (server-side) ─────────────────────
 
-      const payload = await this.parseJson(response);
-      if (!response.ok) {
-        throw toPravaError(response.status, payload, response.headers.get('x-request-id') ?? undefined);
-      }
-
-      return approvalResponseSchema.parse(payload);
-    }, this.retry);
+  async createSession(userId: string, userEmail?: string): Promise<SessionResponse> {
+    const response = await fetch(`${this.baseUrl}/v1/sessions`, {
+      method: 'POST',
+      headers: this.headers(),
+      body: JSON.stringify({ user_id: userId, user_email: userEmail }),
+    });
+    return this.handleResponse<SessionResponse>(response);
   }
 
-  async getApprovalStatus(intentId: string): Promise<PravaApprovalRequest> {
-    return withRetry(async () => {
-      const response = await fetch(`${this.baseUrl}/v1/intents/${intentId}/approvals/latest`, {
-        method: 'GET',
-        headers: this.getHeaders(),
-      });
+  // ── Intent Management (server-side) ──────────────────────
 
-      const payload = await this.parseJson(response);
-      if (!response.ok) {
-        throw toPravaError(response.status, payload, response.headers.get('x-request-id') ?? undefined);
-      }
-
-      return approvalResponseSchema.parse(payload);
-    }, this.retry);
+  async registerIntent(params: RegisterIntentParams): Promise<RegisterIntentResult> {
+    const response = await fetch(`${this.baseUrl}/v1/intents`, {
+      method: 'POST',
+      headers: this.headers(),
+      body: JSON.stringify({
+        card_id: params.cardId,
+        merchant: params.merchant,
+        amount: params.amount,
+        currency: params.currency,
+        item_count: params.itemCount,
+        product_url: params.productUrl,
+        use_limit: params.useLimit,
+        frequency: params.frequency,
+        expires_at: params.expiresAt,
+      }),
+    });
+    const result = await this.handleResponse<RegisterIntentResult>(response);
+    return result;
   }
 
-  async issueMerchantToken(intentId: string): Promise<PravaTransactionToken> {
-    return withRetry(async () => {
-      const response = await fetch(`${this.baseUrl}/v1/intents/${intentId}/token`, {
-        method: 'POST',
-        headers: this.getHeaders(),
-      });
-
-      const payload = await this.parseJson(response);
-      if (!response.ok) {
-        throw toPravaError(response.status, payload, response.headers.get('x-request-id') ?? undefined);
-      }
-
-      return transactionTokenSchema.parse(payload);
-    }, this.retry);
+  async invokeIntent(params: InvokeIntentParams): Promise<PaymentTokens> {
+    const response = await fetch(`${this.baseUrl}/v1/intents/${params.intentId}/tokens`, {
+      method: 'POST',
+      headers: this.headers(),
+      body: JSON.stringify({
+        merchant: params.merchant,
+        amount: params.amount,
+        item_count: params.itemCount,
+      }),
+    });
+    return this.handleResponse<PaymentTokens>(response);
   }
 
-  async getTransactionStatus(transactionId: string): Promise<PravaTransactionStatus> {
-    return withRetry(async () => {
-      const response = await fetch(`${this.baseUrl}/v1/transactions/${transactionId}`, {
-        method: 'GET',
-        headers: this.getHeaders(),
-      });
-
-      const payload = await this.parseJson(response);
-      if (!response.ok) {
-        throw toPravaError(response.status, payload, response.headers.get('x-request-id') ?? undefined);
-      }
-
-      return transactionStatusSchema.parse(payload);
-    }, this.retry);
+  async registerAndInvokeIntent(params: RegisterAndInvokeParams): Promise<PaymentTokens> {
+    const response = await fetch(`${this.baseUrl}/v1/intents/register-and-invoke`, {
+      method: 'POST',
+      headers: this.headers(),
+      body: JSON.stringify({
+        card_id: params.cardId,
+        merchant: params.merchant,
+        amount: params.amount,
+        currency: params.currency,
+        item_count: params.itemCount,
+        product_url: params.productUrl,
+      }),
+    });
+    return this.handleResponse<PaymentTokens>(response);
   }
 
-  createBrowserCollector(config: {
-    publishableKey: string;
-    sessionToken: string;
-    iframeUrl: string;
-    container: string | HTMLElement;
-  }) {
-    const sdk = new PravaSDK({ publishableKey: config.publishableKey });
-
-    return {
-      collectPAN: () => sdk.collectPAN({ sessionToken: config.sessionToken, iframeUrl: config.iframeUrl, container: config.container }),
-      destroy: () => sdk.destroy(),
-    };
+  async updateIntent(params: UpdateIntentParams): Promise<UpdateIntentResult> {
+    const response = await fetch(`${this.baseUrl}/v1/intents/${params.intentId}`, {
+      method: 'PATCH',
+      headers: this.headers(),
+      body: JSON.stringify({
+        amount: params.amount,
+        item_count: params.itemCount,
+        use_limit: params.useLimit,
+        frequency: params.frequency,
+        expires_at: params.expiresAt,
+      }),
+    });
+    return this.handleResponse<UpdateIntentResult>(response);
   }
 
-  private getHeaders(includeSecret = false): HeadersInit {
+  async deleteIntent(intentId: string): Promise<DeleteIntentResult> {
+    const response = await fetch(`${this.baseUrl}/v1/intents/${intentId}`, {
+      method: 'DELETE',
+      headers: this.headers(),
+    });
+    return this.handleResponse<DeleteIntentResult>(response);
+  }
+
+  // ── Card Management (server-side) ────────────────────────
+
+  async listCards(): Promise<Card[]> {
+    const response = await fetch(`${this.baseUrl}/v1/cards`, {
+      method: 'GET',
+      headers: this.headers(),
+    });
+    return this.handleResponse<Card[]>(response);
+  }
+
+  async removeCard(cardId: string): Promise<RemoveCardResult> {
+    const response = await fetch(`${this.baseUrl}/v1/cards/${cardId}`, {
+      method: 'DELETE',
+      headers: this.headers(),
+    });
+    return this.handleResponse<RemoveCardResult>(response);
+  }
+
+  async getTransactionStatus(transactionId: string): Promise<{
+    transaction_id: string;
+    intent_id: string;
+    merchant: string;
+    amount: number;
+    currency: string;
+    status: 'pending' | 'authorized' | 'captured' | 'failed' | 'voided';
+    authorization_code?: string;
+    receipt_url?: string;
+    failure_reason?: string;
+    updated_at: string;
+  }> {
+    const response = await fetch(`${this.baseUrl}/v1/transactions/${transactionId}`, {
+      method: 'GET',
+      headers: this.headers(),
+    });
+    return this.handleResponse(response);
+  }
+
+  // ── Helpers ──────────────────────────────────────────────
+
+  private headers(): Record<string, string> {
     return {
       'Content-Type': 'application/json',
-      'Api-Key': this.apiKey,
-      ...(includeSecret ? { Authorization: `Bearer ${this.secretKey}` } : {}),
+      'Api-Key': this.secretKey,
     };
   }
 
@@ -279,19 +330,49 @@ export class PravaClient {
       return null;
     }
   }
+
+  private async handleResponse<T>(response: Response): Promise<T> {
+    const payload = await this.parseJson(response);
+    if (!response.ok) {
+      const code = payload && typeof payload === 'object' && 'code' in (payload as object)
+        ? (payload as Record<string, unknown>).code as string
+        : 'PRAVA_REQUEST_FAILED';
+      const message = payload && typeof payload === 'object' && 'message' in (payload as object)
+        ? (payload as Record<string, unknown>).message as string
+        : 'Prava request failed';
+      throw new PravaError(message, code, {
+        details: payload as Record<string, unknown>,
+        status: response.status,
+        requestId: response.headers.get('x-request-id') ?? undefined,
+      });
+    }
+    return payload as T;
+  }
 }
 
-export function createPravaClientFromEnv() {
-  const apiKey = process.env.PRAVA_API_KEY;
+// ── Factory ──────────────────────────────────────────────────
+
+export function createPravaFromEnv(): Prava {
+  const publishableKey = process.env.PRAVA_PUBLISHABLE_KEY || process.env.PRAVA_API_KEY;
   const secretKey = process.env.PRAVA_SECRET_KEY;
 
-  if (!apiKey || !secretKey) {
-    throw new Error('Missing PRAVA_API_KEY or PRAVA_SECRET_KEY');
+  if (!publishableKey) {
+    throw new PravaError(
+      'Missing PRAVA_PUBLISHABLE_KEY or PRAVA_API_KEY in environment',
+      'PRAVA_CONFIG_ERROR',
+    );
+  }
+  if (!secretKey) {
+    throw new PravaError(
+      'Missing PRAVA_SECRET_KEY in environment',
+      'PRAVA_CONFIG_ERROR',
+    );
   }
 
-  return new PravaClient({
-    apiKey,
+  return new Prava({
+    publishableKey,
     secretKey,
     baseUrl: process.env.PRAVA_BASE_URL,
+    iframeUrl: process.env.PRAVA_IFRAME_URL,
   });
 }
