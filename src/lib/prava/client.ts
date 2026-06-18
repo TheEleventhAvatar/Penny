@@ -228,6 +228,7 @@ export class Prava {
     return {
       'Content-Type': 'application/json',
       'Api-Key': this.publishableKey,
+      'Authorization': `Bearer ${this.secretKey}`,
     };
   }
 
