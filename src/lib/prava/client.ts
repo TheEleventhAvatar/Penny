@@ -105,7 +105,7 @@ export class Prava {
   constructor(config: PravaConfig) {
     this.publishableKey = config.publishableKey;
     this.secretKey = config.secretKey;
-    this.baseUrl = config.baseUrl ?? 'https://api.prava.space';
+    this.baseUrl = config.baseUrl ?? 'https://sandbox.api.prava.space';
   }
 
   // ── Card Collection (client-side, via @prava-sdk/core) ───
