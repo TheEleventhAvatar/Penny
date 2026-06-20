@@ -142,10 +142,16 @@ export class Prava {
   // ── Session Management (server-side, Bearer auth) ─────────
 
   async createSession(userId: string, userEmail?: string): Promise<SessionResponse> {
+    const body = { userId, userEmail };
+    console.log('[Prava] POST /v1/sessions', {
+      url: `${this.baseUrl}/v1/sessions`,
+      headers: this.authHeaders(),
+      body,
+    });
     const response = await fetch(`${this.baseUrl}/v1/sessions`, {
       method: 'POST',
       headers: this.authHeaders(),
-      body: JSON.stringify({ userId, userEmail }),
+      body: JSON.stringify(body),
     });
 
     if (!response.ok) {
