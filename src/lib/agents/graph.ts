@@ -32,13 +32,7 @@ export const commerceGraph = new StateGraph(CommerceState)
     }
 
     const prava = createPravaFromEnv();
-    const session = await prava.createSession({
-      userId: state.userId,
-      userEmail: `${state.userId}@penny.app`,
-      totalAmount: String(state.intent.amount),
-      currency: state.intent.currency,
-      description: `${state.intent.product} from ${state.intent.merchant} — ${state.intent.reason}`,
-    });
+    const session = await prava.createSession(state.userId, `${state.userId}@penny.app`);
 
     return {
       pravaIntentId: session.session_id,

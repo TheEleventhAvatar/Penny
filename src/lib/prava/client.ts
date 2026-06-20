@@ -141,33 +141,11 @@ export class Prava {
 
   // ── Session Management (server-side, Bearer auth) ─────────
 
-  async createSession(params: CreateSessionParams): Promise<SessionResponse> {
+  async createSession(userId: string, userEmail?: string): Promise<SessionResponse> {
     const response = await fetch(`${this.baseUrl}/v1/sessions`, {
       method: 'POST',
       headers: this.authHeaders(),
-      body: JSON.stringify({
-        user_id: params.userId,
-        user_email: params.userEmail,
-        total_amount: params.totalAmount ?? '99.99',
-        currency: params.currency ?? 'USD',
-        description: params.description ?? 'Purchase',
-        ...(params.callbackUrl && { callback_url: params.callbackUrl }),
-        purchase_context: params.purchaseContext ?? [{
-          merchant_details: {
-            name: 'Penny AI',
-            url: 'https://penny.app',
-            country_code_iso2: 'US',
-            category_code: '5734',
-            category: 'Software Services',
-          },
-          product_details: [{
-            description: params.description ?? 'Purchase',
-            unit_price: params.totalAmount ?? '99.99',
-            quantity: 1,
-          }],
-          effective_until_minutes: 15,
-        }],
-      }),
+      body: JSON.stringify({ userId, userEmail }),
     });
 
     if (!response.ok) {

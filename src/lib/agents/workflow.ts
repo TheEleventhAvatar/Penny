@@ -22,13 +22,7 @@ export async function runCommerceAssistant(input: {
   const extracted = await extractPurchaseIntent(input.userMessage);
   const intent = asPurchaseIntent(extracted) satisfies PurchaseIntent;
 
-  const session = await prava.createSession({
-    userId: input.userId,
-    userEmail: `${input.userId}@penny.app`,
-    totalAmount: String(intent.amount),
-    currency: intent.currency,
-    description: `${intent.product} from ${intent.merchant} — ${intent.reason}`,
-  });
+  const session = await prava.createSession(input.userId, `${input.userId}@penny.app`);
 
   return {
     sessionId: session.session_id,

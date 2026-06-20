@@ -15,13 +15,7 @@ export async function POST(request: Request) {
     const extracted = await extractPurchaseIntent(body.userMessage);
     const intent = purchaseIntentSchema.parse(asPurchaseIntent(extracted));
 
-    const session = await prava.createSession({
-      userId: body.userId,
-      userEmail: `${body.userId}@penny.app`,
-      totalAmount: String(intent.amount),
-      currency: intent.currency,
-      description: `${intent.product} from ${intent.merchant} — ${intent.reason}`,
-    });
+    const session = await prava.createSession(body.userId, `${body.userId}@penny.app`);
 
     return NextResponse.json({
       sessionId: session.session_id,
