@@ -1,6 +1,3 @@
-import { PravaSDK } from '@prava-sdk/core';
-import type { CollectPANResult, CollectPANOptions } from '@prava-sdk/core';
-
 // ── Session Types ────────────────────────────────────────────
 
 export interface SessionResponse {
@@ -9,6 +6,16 @@ export interface SessionResponse {
   expires_at: string;
   iframe_url: string;
   order_id: string;
+}
+
+export interface CreateSessionParams {
+  userId: string;
+  userEmail: string;
+  totalAmount?: string;
+  currency?: string;
+  description?: string;
+  callbackUrl?: string;
+  purchaseContext?: PurchaseContextItem[];
 }
 
 interface PurchaseContextItem {
@@ -25,16 +32,6 @@ interface PurchaseContextItem {
     quantity?: number;
   }>;
   effective_until_minutes?: number;
-}
-
-export interface CreateSessionParams {
-  userId: string;
-  userEmail: string;
-  totalAmount?: string;
-  currency?: string;
-  description?: string;
-  callbackUrl?: string;
-  purchaseContext?: PurchaseContextItem[];
 }
 
 // ── Payment Result Types ─────────────────────────────────────
@@ -75,9 +72,8 @@ export interface PaymentResultResponse {
 // ── Config ───────────────────────────────────────────────────
 
 export interface PravaConfig {
-  publishableKey: string;  // pk_test_xxx — for client-side SDK
-  secretKey: string;       // sk_test_xxx — for server-side API calls (Authorization: Bearer)
-  baseUrl?: string;        // API base URL (default: https://api.prava.space)
+  secretKey: string;       // sk_test_xxx — for server-side API calls (Api-Key + Authorization)
+  baseUrl?: string;        // API base URL (default: https://sandbox.api.prava.space)
 }
 
 // ── Error ────────────────────────────────────────────────────
@@ -97,49 +93,15 @@ export class PravaError extends Error {
 // ── Prava Client ─────────────────────────────────────────────
 
 export class Prava {
-  private readonly publishableKey: string;
   private readonly secretKey: string;
   private readonly baseUrl: string;
-  private sdk: PravaSDK | null = null;
 
   constructor(config: PravaConfig) {
-    this.publishableKey = config.publishableKey;
     this.secretKey = config.secretKey;
     this.baseUrl = config.baseUrl ?? 'https://sandbox.api.prava.space';
   }
 
-  // ── Card Collection (client-side, via @prava-sdk/core) ───
-
-  initSDK(): PravaSDK {
-    if (!this.sdk) {
-      this.sdk = new PravaSDK({ publishableKey: this.publishableKey });
-    }
-    return this.sdk;
-  }
-
-  async collectPAN(
-    sessionToken: string,
-    iframeUrl: string,
-    container: string | HTMLElement,
-    callbacks?: Pick<CollectPANOptions, 'onReady' | 'onChange' | 'onSuccess' | 'onError'>,
-  ): Promise<CollectPANResult> {
-    const sdk = this.initSDK();
-    return sdk.collectPAN({
-      sessionToken,
-      iframeUrl,
-      container,
-      ...callbacks,
-    });
-  }
-
-  destroySDK(): void {
-    if (this.sdk) {
-      this.sdk.destroy();
-      this.sdk = null;
-    }
-  }
-
-  // ── Session Management (server-side, Bearer auth) ─────────
+  // ── Session Management ────────────────────────────────────
 
   async createSession(userId: string, userEmail?: string): Promise<SessionResponse> {
     const body = { userId, userEmail };
@@ -211,7 +173,7 @@ export class Prava {
   private authHeaders(): Record<string, string> {
     return {
       'Content-Type': 'application/json',
-      'Api-Key': this.publishableKey,
+      'Api-Key': this.secretKey,
       'Authorization': `Bearer ${this.secretKey}`,
     };
   }
@@ -228,15 +190,8 @@ export class Prava {
 // ── Factory ──────────────────────────────────────────────────
 
 export function createPravaFromEnv(): Prava {
-  const publishableKey = process.env.NEXT_PUBLIC_PUBLISHABLE_KEY || process.env.PRAVA_PUBLISHABLE_KEY || process.env.PRAVA_API_KEY;
   const secretKey = process.env.MERCHANT_SECRET_KEY || process.env.PRAVA_SECRET_KEY;
 
-  if (!publishableKey) {
-    throw new PravaError(
-      'Missing publishable key. Set NEXT_PUBLIC_PUBLISHABLE_KEY or PRAVA_PUBLISHABLE_KEY in env.',
-      'PRAVA_CONFIG_ERROR',
-    );
-  }
   if (!secretKey) {
     throw new PravaError(
       'Missing secret key. Set MERCHANT_SECRET_KEY or PRAVA_SECRET_KEY in env.',
@@ -245,7 +200,6 @@ export function createPravaFromEnv(): Prava {
   }
 
   return new Prava({
-    publishableKey,
     secretKey,
     baseUrl: process.env.NEXT_PUBLIC_BACKEND_URL || process.env.PRAVA_BASE_URL,
   });
