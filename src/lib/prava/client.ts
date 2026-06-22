@@ -57,7 +57,7 @@ export interface PaymentLineItem {
 
 export interface PaymentTransaction {
   txn_id: string;
-  status: 'pending' | 'awaiting_result' | 'completed' | 'failed';
+  status: 'pending' | 'awaiting_result' | 'completed' | 'failed' | string;
   line_items: PaymentLineItem[];
   error?: { code: string; message: string };
 }
@@ -65,15 +65,15 @@ export interface PaymentTransaction {
 export interface PaymentResultResponse {
   session_id: string;
   order_id: string | null;
-  status: 'pending' | 'awaiting_result' | 'completed' | 'failed';
+  status: 'pending' | 'awaiting_result' | 'completed' | 'failed' | string;
   transactions: PaymentTransaction[];
 }
 
 // ── Config ───────────────────────────────────────────────────
 
 export interface PravaConfig {
-  secretKey: string;       // sk_test_xxx — for server-side API calls (Api-Key + Authorization)
-  baseUrl?: string;        // API base URL (default: https://sandbox.api.prava.space)
+  secretKey: string;
+  baseUrl?: string;
 }
 
 // ── Error ────────────────────────────────────────────────────
@@ -98,18 +98,53 @@ export class Prava {
 
   constructor(config: PravaConfig) {
     this.secretKey = config.secretKey;
-    this.baseUrl = config.baseUrl ?? 'https://sandbox.api.prava.space';
+    this.baseUrl = config.baseUrl ?? 'https://api.prava.space';
   }
 
   // ── Session Management ────────────────────────────────────
 
-  async createSession(userId: string, userEmail?: string): Promise<SessionResponse> {
-    const body = { userId, userEmail };
-    console.log('[Prava] POST /v1/sessions', {
-      url: `${this.baseUrl}/v1/sessions`,
-      headers: this.authHeaders(),
-      body,
-    });
+  async createSession(params: CreateSessionParams): Promise<SessionResponse> {
+    const {
+      userId,
+      userEmail,
+      totalAmount = '99.99',
+      currency = 'USD',
+      description = 'Purchase',
+      callbackUrl,
+      purchaseContext,
+    } = params;
+
+    const body: Record<string, unknown> = {
+      user_id: userId,
+      user_email: userEmail,
+      total_amount: totalAmount,
+      currency,
+      description,
+      purchase_context: purchaseContext || [
+        {
+          merchant_details: {
+            name: 'Penny AI',
+            url: 'https://penny.prava.space',
+            country_code_iso2: 'US',
+            category_code: '5734',
+            category: 'Software Services',
+          },
+          product_details: [
+            {
+              description: description || 'Purchase',
+              unit_price: totalAmount,
+              quantity: 1,
+            },
+          ],
+          effective_until_minutes: 15,
+        },
+      ],
+    };
+
+    if (callbackUrl) {
+      body.callback_url = callbackUrl;
+    }
+
     const response = await fetch(`${this.baseUrl}/v1/sessions`, {
       method: 'POST',
       headers: this.authHeaders(),
@@ -118,9 +153,10 @@ export class Prava {
 
     if (!response.ok) {
       const errorData = await this.parseJson(response);
-      const err = errorData && typeof errorData === 'object'
-        ? (errorData as Record<string, unknown>).error as Record<string, unknown> ?? {}
-        : {};
+      const err =
+        errorData && typeof errorData === 'object'
+          ? ((errorData as Record<string, unknown>).error as Record<string, unknown>) ?? {}
+          : {};
       throw new PravaError(
         (err.message as string) || `Failed to create session (HTTP ${response.status})`,
         (err.code as string) || 'SESSION_CREATE_ERROR',
@@ -146,9 +182,10 @@ export class Prava {
         throw new PravaError('Session not found', 'SESSION_NOT_FOUND');
       }
       const errorData = await this.parseJson(response);
-      const err = errorData && typeof errorData === 'object'
-        ? (errorData as Record<string, unknown>).error as Record<string, unknown> ?? {}
-        : {};
+      const err =
+        errorData && typeof errorData === 'object'
+          ? ((errorData as Record<string, unknown>).error as Record<string, unknown>) ?? {}
+          : {};
       throw new PravaError(
         (err.message as string) || `Failed to poll payment result (HTTP ${response.status})`,
         (err.code as string) || 'POLL_ERROR',
@@ -173,7 +210,7 @@ export class Prava {
   private authHeaders(): Record<string, string> {
     return {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${this.secretKey}`,
+      Authorization: `Bearer ${this.secretKey}`,
     };
   }
 
@@ -189,17 +226,17 @@ export class Prava {
 // ── Factory ──────────────────────────────────────────────────
 
 export function createPravaFromEnv(): Prava {
-  const secretKey = process.env.MERCHANT_SECRET_KEY || process.env.PRAVA_SECRET_KEY;
+  const secretKey = process.env.MERCHANT_SECRET_KEY;
 
   if (!secretKey) {
     throw new PravaError(
-      'Missing secret key. Set MERCHANT_SECRET_KEY or PRAVA_SECRET_KEY in env.',
+      'Missing MERCHANT_SECRET_KEY. Set it in .env.local (server-side only).',
       'PRAVA_CONFIG_ERROR',
     );
   }
 
   return new Prava({
     secretKey,
-    baseUrl: process.env.NEXT_PUBLIC_BACKEND_URL || process.env.PRAVA_BASE_URL,
+    baseUrl: process.env.NEXT_PUBLIC_BACKEND_URL || 'https://api.prava.space',
   });
 }
